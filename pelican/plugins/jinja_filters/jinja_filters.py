@@ -1,8 +1,10 @@
 """Various filters for Jinja."""
 
-from datetime import datetime as _datetime
+import logging
 
 from titlecase import titlecase as _titlecase
+
+from pelican.utils import SafeDatetime
 
 __all__ = [
     "article_date",
@@ -10,6 +12,10 @@ __all__ = [
     "datetime",
     "titlecase",
 ]
+
+
+LOG_PREFIX = "[Jinja Filters]"
+logger = logging.getLogger(__name__)
 
 
 def datetime(value, format_str="%Y/%m/%d %H:%M"):
@@ -28,7 +34,17 @@ def datetime(value, format_str="%Y/%m/%d %H:%M"):
         str: value, after the format_str has been applied
 
     """
-    return value.strftime(format_str)
+    try:
+        return value.strftime(format_str)
+    except ValueError as e:
+        logger.error(
+            "%s ValueError. value: %s, type(value): %s, format_str: %s",
+            LOG_PREFIX,
+            value,
+            type(value),
+            format_str,
+        )
+        raise e
 
 
 def article_date(value):
@@ -46,7 +62,13 @@ def article_date(value):
         str: value, formatted nicely for displaying the date.
 
     """
-    return "{dt:%A}, {dt:%B} {dt.day}, {dt.year}".format(dt=value)
+    try:
+        return "{dt:%A}, {dt:%B} {dt.day}, {dt.year}".format(dt=value)
+    except ValueError as e:
+        logger.error(
+            "%s ValueError. value: %s, type(value): %s", LOG_PREFIX, value, type(value)
+        )
+        raise e
 
 
 def datetime_from_period(value):
@@ -79,9 +101,9 @@ def datetime_from_period(value):
         value = (value,)
 
     if len(value) >= 2 and isinstance(value[1], int):
-        placeholder_month = _datetime(2021, value[1], 1).strftime("%B")
+        placeholder_month = SafeDatetime(2021, value[1], 1).strftime("%B")
     elif len(value) == 1:
-        placeholder_month = _datetime(2021, 1, 1).strftime("%B")
+        placeholder_month = SafeDatetime(2021, 1, 1).strftime("%B")
     else:
         placeholder_month = value[1]
 
@@ -92,7 +114,7 @@ def datetime_from_period(value):
             str(value[2]) if len(value) >= 3 else "1",
         )
     )
-    new_datetime = _datetime.strptime(new_value, "%Y %B %d")
+    new_datetime = SafeDatetime.strptime(new_value, "%Y %B %d")
     return new_datetime
 
 
@@ -111,7 +133,23 @@ def merge_date_url(value, url):
         string: combined URL
 
     """
-    return url.format(date=value)
+    try:
+        return url.format(date=value)
+    except ValueError:
+        # will throw a "ValueError" if the value is a datetime.datetime and the url
+        # contains a "-" (e.g. "{date:%-d}") (used in Pelican to strip the leading
+        # zero)
+        try:
+            return url.format(date=SafeDatetime(value.year, value.month, value.day))
+        except ValueError as e:
+            logger.error(
+                "%s ValueError. value: %s, type(value): %s, url: %s",
+                LOG_PREFIX,
+                value,
+                type(value),
+                url,
+            )
+            raise e
 
 
 def breaking_spaces(value):
